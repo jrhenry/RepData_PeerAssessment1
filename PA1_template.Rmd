@@ -1,25 +1,151 @@
 ---
 title: "Reproducible Research: Peer Assessment 1"
+author: "J. Henry"
+date: "April 27, 2018"
 output: 
-  html_document:
-    keep_md: true
+    html_document:
+        keep_md: true
+    
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
 
-## Loading and preprocessing the data
+## Reading the dataset
 
+The following code reads in the activity data from it's web location.
 
+```{r dataread, results='hide'}
+temp <- tempfile(fileext = ".zip")
+download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip", 
+              temp)
+activity <- read.csv(unzip(temp, exdir = tempdir()))
+unlink(temp)
+```
 
-## What is mean total number of steps taken per day?
+## Exploring Daily Activity
 
+First we will look at the total, mean, and median steps per day for our dataset 
+seen in the table below. For this section any row with a missing value will be 
+removed prior to our analysis. Additionally, we will use things from the 
+*tidyverse* and *knitr* packages.
 
+```{r packageInstall, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+```
 
-## What is the average daily activity pattern?
+### Original Data Table
+```{r stepsStats, warning=FALSE}
+activitynarm <- drop_na(activity, steps)
+gdata <- activitynarm %>% group_by(date) %>% summarize(Step_Count = sum(steps), 
+        Step_Mean = round(mean(steps), digits = 2), Step_Median = median(steps))
+kable(gdata, "markdown", align = 'c')
+```
 
+Now we will produce a histogram of the total number of steps taken per day.
 
+```{r stepsHist}
+hist(gdata$Step_Count, breaks = 15, main = "Histogram of Steps per Day", 
+     xlab = "Step Count", ylab = "Frequency of Step Count", ylim = c(0,25))
+```
 
-## Imputing missing values
+## Daily Activity Pattern
 
+Now well will explore the distibution of steps by time interval. The data was 
+originally collected in five minute blocks. Below is a chart that depicts the 
+average steps per interval across all days of data.
 
+```{r averageStepsPlot}
+gdata1 <- activitynarm %>% group_by(interval) %>% 
+    summarize(meanSteps = mean(steps))
+plot(meanSteps ~ interval, data = gdata1, type = "l", 
+     main = "Average Steps per Time Interval", xlab = "Time Interval",
+     ylab = "Average Number of Steps")
 
-## Are there differences in activity patterns between weekdays and weekends?
+```
+
+The time period with the largest average number of steps is starts at 835 
+minutes.
+
+```{r maxStepsInterval}
+print(gdata1$interval[which.max(gdata1$meanSteps)])
+```
+
+# Imputing Missing Values
+
+If you explore the dataset you will discover that there are several instances of
+"NA." 2304 occurances in fact.
+
+```{r countNA}
+sum(is.na(activity))
+```
+
+The collowing code will impute the time interval mean into any areas that 
+contain missing values. This is good because it does not bias the time interval
+mean value; unfortunately, it will bias the time interval variance. Our new 
+dataset is *imputeActivity.*
+
+```{r imputeMissingData}
+intervalMean <- activity %>% group_by(interval) %>% summarize(steps =
+    mean(steps,  na.rm = T))
+stepsRep <- rep(intervalMean$steps,61)
+naID <- which(is.na(activity$steps))
+imputeActivity <- activity
+imputeActivity[naID, "steps"] <- stepsRep[naID]
+
+```
+
+The next section will re-examine the dataset with the NA values replaced by the 
+time interval mean.
+
+### Imputed Data Table
+```{r imputedStats}
+gdata2 <- imputeActivity %>% group_by(date) %>% summarize(Step_Count = sum(steps), 
+        Step_Mean = round(mean(steps), digits = 2), Step_Median = median(steps))
+kable(gdata2, "markdown", align = 'c', caption = "Imputed Dataset")
+```
+
+Comparing the two data tables it is clear that there was no change to the 
+step means. That is expected because of the techinique used to impute the 
+missing data does not bias the mean. It does, however, greatly impact the median 
+producing the only values greater than 0. This is because all the time intervals 
+have a value now based on the mean for that interval. Additionally, each of the 
+imputed medians are equal to 34.11 because they are all calculated from the 
+same data set. Below is a histogram based upon the imputed data set. Note that 
+the bar at the 10000 step level had an increase of eight, the number of dates 
+with missing data. All the imputed days 
+increased the count for the mean which happens to be just above the 10000 
+count.
+
+```{r imputedStepsHist}
+hist(gdata2$Step_Count, breaks = 15, main = "Histogram of Imputed Steps per Day", 
+     xlab = "Imputed Step Count", ylab = "Frequency of Imputed Step Count",
+     ylim = c(0,25))
+```
+
+## Differences Between Weekdays and Weekends
+
+The final piece of exploration we will complete is determingin if any 
+differences exist between steps during weekdays and weekends. For this analysis 
+the dataset containing the imputed data is used. The code below identifies the 
+day of the week for each date, identifies it as either a weekend or 
+weekday, and finally groups the steps per time interval based on it being a 
+weekend or weekday.
+
+```{r dayIdentifier, results="hide"}
+dayData <- imputeActivity
+dayData$day <- weekdays(as.POSIXlt(imputeActivity$date))
+dayData$dayType <- ifelse(dayData$day %in% c("Saturday", "Sunday"), "Weekend", 
+                          "Weekday")
+gdata3 <- dayData %>% group_by(interval, dayType) %>% summarize(Step_Mean = 
+                        round(mean(steps), digits = 2))
+```
+
+Now that the data is properly grouped a time-series plot ir produced below. What it shows is that during the week there is a large, initial spike followed by numbers bewteen 25 and 100 steps per interval. During the weekend there is no major spike but the range of steps is generally higher between 50 and 150 per interval. 
+
+```{r dayTypePlot}
+ggplot(gdata3, aes(x=interval, y = Step_Mean))+geom_line() + facet_wrap(~dayType, dir = "v")
+```
+
